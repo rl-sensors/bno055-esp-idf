@@ -72,6 +72,12 @@ typedef enum {
     BNO055_VECTOR_GRAVITY = 0x2E         // Default: m/s²
 } bno055_vector_type_t;
 
+typedef struct {
+    int16_t yaw, roll, pitch;
+    int16_t yaw_dot, roll_dot, pitch_dot;
+    uint8_t cal_system, cal_gyro, cal_accel, cal_mag;
+} BnoData;
+
 static esp_err_t register_read(uint8_t reg_addr, uint8_t *data, size_t len);
 static esp_err_t register_write_byte(uint8_t reg_addr, uint8_t data);
 
@@ -80,6 +86,7 @@ void bno055_delay(int time);
 void bno055_setOperationMode(bno055_opmode_t mode);
 void bno055_setOperationModeConfig();
 void bno055_setOperationModeNDOF();
+void bno055_getCalibration(uint8_t *sys, uint8_t *gyro, uint8_t *accel, uint8_t *mag);
 void bno055_task(void *pvParams);
 
 #endif //BNO055_TEST_BNO055_H

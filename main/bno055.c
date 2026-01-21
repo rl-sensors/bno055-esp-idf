@@ -7,6 +7,7 @@
 #include "bno055.h"
 
 extern char *TAG;
+QueueHandle_t bno_queue;
 
 #define I2C_MASTER_TIMEOUT_MS       1000
 
@@ -14,7 +15,7 @@ void bno055_task(void *pvParams) {
     // reset
     ESP_LOGI(TAG, "Going to reset the BNO");
     register_write_byte(0x00, 0x00);
-//    register_write_byte(BNO055_SYS_TRIGGER, 0x20);
+    //    register_write_byte(BNO055_SYS_TRIGGER, 0x20);
     bno055_delay(700);
 
     uint8_t id = 0;
@@ -35,9 +36,9 @@ void bno055_task(void *pvParams) {
                           (0 << 4) | // Temperature = Celsius
                           (1 << 2) | // Euler = Rads
                           (1 << 1) | // Gyro = Rads per sec
-                          (0 << 0);  // Accelerometer = m/s^2
+                          (0 << 0); // Accelerometer = m/s^2
         register_write_byte(BNO055_UNIT_SEL, unitsel);
-//        register_write_byte(BNO055_UNIT_SEL, 0b10000110);
+        //        register_write_byte(BNO055_UNIT_SEL, 0b10000110);
         bno055_delay(10);
 
         bno055_setOperationModeNDOF();
@@ -48,19 +49,44 @@ void bno055_task(void *pvParams) {
 
         uint8_t bno_euler[8];
         uint8_t bno_gyro[6];
+        uint8_t system, gyro, accel, mag = 0;
+
+        BnoData bno_data = {
+            .pitch = 0, .pitch_dot = 0, .roll = 0,
+            .roll_dot = 0, .yaw = 0, .yaw_dot = 0,
+            .cal_system = 0, .cal_gyro = 0, .cal_accel = 0, .cal_mag = 0
+        };
+
+        bno_queue = xQueueCreate(1, sizeof(bno_data));
 
         while (1) {
             xLastWakeTime = xTaskGetTickCount();
             register_read(BNO055_VECTOR_EULER, bno_euler, 6);
-            //ESP_LOGI(TAG, "[%d] Yaw: %d, Roll: %d, Pitch: %d", xTaskGetTickCount() / portTICK_PERIOD_MS, bno_euler[0], bno_euler[1], bno_euler[2]);
+            bno_data.yaw = ((int16_t)bno_euler[0]) | (((int16_t)bno_euler[1]) << 8);
+            bno_data.roll = ((int16_t)bno_euler[2]) | (((int16_t)bno_euler[3]) << 8);
+            bno_data.pitch = ((int16_t)bno_euler[4]) | (((int16_t)bno_euler[5]) << 8);
 
             register_read(BNO055_VECTOR_GYROSCOPE, bno_gyro, 6);
-            //ESP_LOGI(TAG, "[%d] Yaw Dot: %d, Roll Dot: %d, Pitch Dot: %d", xTaskGetTickCount() / portTICK_PERIOD_MS, bno_gyro[2], bno_gyro[1], bno_gyro[0]);
+            bno_data.pitch_dot = ( ((int16_t)bno_gyro[0]) | (((int16_t)bno_gyro[1]) << 8) ) ;
+            bno_data.pitch_dot *= -1;
+            bno_data.roll_dot = ( ((int16_t)bno_gyro[2]) | (((int16_t)bno_gyro[3]) << 8) );
+            bno_data.roll_dot *= -1;
+            bno_data.yaw_dot = ( ((int16_t)bno_gyro[4]) | (((int16_t)bno_gyro[5]) << 8) );
+            bno_data.yaw_dot *= -1;
+
+            bno055_getCalibration(&system, &gyro, &accel, &mag);
+            bno_data.cal_system = system;
+            bno_data.cal_gyro = gyro;
+            bno_data.cal_accel = accel;
+            bno_data.cal_mag = mag;
+
+            xQueueOverwrite(bno_queue, (void *) &bno_data);
+
             uint32_t end = xTaskGetTickCount();
-            ESP_LOGI(TAG, "[%lu]\tY: %d\tR: %d\tP: %d\tYD: %d\tRD: %d\tPD: %d",
-                    end,
-                     bno_euler[0], bno_euler[1], bno_euler[2],
-                     bno_gyro[2], bno_gyro[1], bno_gyro[0]);
+            ESP_LOGI(TAG, "[%lu]\tY: %d\tP: %d\tR: %d\tYD: %d\tPD: %d\tRD: %d",
+                     end,
+                     bno_data.yaw, bno_data.pitch, bno_data.roll,
+                     bno_data.yaw_dot, bno_data.pitch_dot, bno_data.roll_dot);
 
             vTaskDelayUntil(&xLastWakeTime, xFrequency);
         }
@@ -71,17 +97,17 @@ void bno055_task(void *pvParams) {
     vTaskDelete(NULL);
 }
 
-static esp_err_t register_read(uint8_t reg_addr, uint8_t *data, size_t len)
-{
-    return i2c_master_write_read_device(CONFIG_I2C_MASTER_NUM, BNO055_SENSOR_ADDR, &reg_addr, 1, data, len, pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+static esp_err_t register_read(uint8_t reg_addr, uint8_t *data, size_t len) {
+    return i2c_master_write_read_device(CONFIG_I2C_MASTER_NUM, BNO055_SENSOR_ADDR, &reg_addr, 1, data, len,
+                                        pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
 }
 
-static esp_err_t register_write_byte(uint8_t reg_addr, uint8_t data)
-{
+static esp_err_t register_write_byte(uint8_t reg_addr, uint8_t data) {
     int ret;
     uint8_t write_buf[2] = {reg_addr, data};
 
-    ret = i2c_master_write_to_device(CONFIG_I2C_MASTER_NUM, BNO055_SENSOR_ADDR, write_buf, sizeof(write_buf), pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    ret = i2c_master_write_to_device(CONFIG_I2C_MASTER_NUM, BNO055_SENSOR_ADDR, write_buf, sizeof(write_buf),
+                                     pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
 
     return ret;
 }
@@ -109,4 +135,22 @@ void bno055_setOperationModeConfig() {
 
 void bno055_setOperationModeNDOF() {
     bno055_setOperationMode(BNO055_OPERATION_MODE_NDOF);
+}
+
+void bno055_getCalibration(uint8_t *sys, uint8_t *gyro, uint8_t *accel, uint8_t *mag) {
+    uint8_t data[1] = "";
+    register_read(BNO055_CALIB_STAT, data, 1);
+    uint8_t callData = data[0];
+    if (sys != NULL) {
+        *sys = (callData >> 6) & 0x03;
+    }
+    if (gyro != NULL) {
+        *gyro = (callData >> 4) & 0x03;
+    }
+    if (accel != NULL) {
+        *accel = (callData >> 2) & 0x03;
+    }
+    if (mag != NULL) {
+        *mag = callData & 0x03;
+    }
 }
