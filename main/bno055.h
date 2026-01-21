@@ -15,7 +15,7 @@
 
 #include <esp_err.h>
 
-#define BNO055_SENSOR_ADDR                 0x29
+#define BNO055_SENSOR_ADDR              0x29 // 0x29 on TAS fliers
 
 // Page 0
 #define BNO055_ID (0xA0)

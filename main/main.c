@@ -29,6 +29,7 @@ static esp_err_t i2c_master_init(void)
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = I2C_MASTER_FREQ_HZ,
+        .clk_flags = 0
     };
 
     i2c_param_config(i2c_master_port, &conf);
